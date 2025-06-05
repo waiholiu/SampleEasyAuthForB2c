@@ -14,7 +14,7 @@ param b2cClientId string = '0d605263-7925-47cc-93b9-dfbd2f415953'
 param b2cOpenIdConfigUrl string = 'https://dohactestb2c.b2clogin.com/dohactestb2c.onmicrosoft.com/B2C_1_SSBA_SANDBOX2/v2.0/.well-known/openid-configuration'
 
 
-var keyVaultName = 'kvvwaf002'
+var keyVaultName = 'kvvwaf003'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-02-01' = {
   name: 'vnet'
@@ -103,7 +103,7 @@ resource authSettings 'Microsoft.Web/sites/config@2023-01-01' = {
       requireAuthentication: true
       unauthenticatedClientAction: 'RedirectToLoginPage'
       redirectToProvider: 'b2c'
-      
+
       
     }
     identityProviders: {
