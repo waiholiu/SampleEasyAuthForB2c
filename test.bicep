@@ -8,11 +8,52 @@ param appServicePlanName string = 'b2c-auth-plan'
 param location string = resourceGroup().location
 
 @description('Azure AD B2C Client ID')
-param b2cClientId string = '5dd13c83-c0ad-4443-a894-6d79d83c4a68'
-
+param b2cClientId string = '0d605263-7925-47cc-93b9-dfbd2f415953'
 
 @description('OpenID Connect metadata endpoint (Azure AD B2C)')
 param b2cOpenIdConfigUrl string = 'https://dohactestb2c.b2clogin.com/dohactestb2c.onmicrosoft.com/B2C_1_SSBA_SANDBOX2/v2.0/.well-known/openid-configuration'
+
+
+var keyVaultName = 'kvvwaf002'
+
+resource vnet 'Microsoft.Network/virtualNetworks@2023-02-01' = {
+  name: 'vnet'
+  location: 'australiaeast'
+  properties: {
+    addressSpace: {
+      addressPrefixes: ['10.0.0.0/16']
+    }
+    subnets: [
+      {
+        name: 'kv-subnet'
+        properties: {
+          addressPrefix: '10.0.0.0/24'
+
+        }
+      }
+      {
+        name: 'appSubnet'
+        properties: {
+          addressPrefix: '10.0.1.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
+          privateLinkServiceNetworkPolicies: 'Disabled'
+          delegations: [
+            {
+              name: 'Microsoft.Web/serverFarms'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+
+
+
+
 
 var hostingPlan = {
   name: appServicePlanName
@@ -44,6 +85,7 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
       linuxFxVersion: 'DOTNETCORE|6.0'
     }
     httpsOnly: true
+    virtualNetworkSubnetId: vnet.properties.subnets[1].id
   }
   identity: {
     type: 'SystemAssigned'
@@ -60,6 +102,9 @@ resource authSettings 'Microsoft.Web/sites/config@2023-01-01' = {
     globalValidation: {
       requireAuthentication: true
       unauthenticatedClientAction: 'RedirectToLoginPage'
+      redirectToProvider: 'b2c'
+      
+      
     }
     identityProviders: {
       customOpenIdConnectProviders: {
@@ -91,14 +136,20 @@ module vault 'br/public:avm/res/key-vault/vault:0.12.1' = {
   name: 'vaultDeployment'
   params: {
     // Required parameters
-    name: 'kvvwaf002'
+    name: keyVaultName
     // Non-required parameters
     enablePurgeProtection: false
     enableRbacAuthorization: true
-    // networkAcls: {
-    //   bypass: 'AzureServices'
-    //   defaultAction: 'Deny'
-    // }
+    networkAcls: {
+      bypass: 'None'
+      defaultAction: 'Deny'
+      
+    }
+    enableVaultForDeployment:false
+    enableVaultForTemplateDeployment: false
+    enableVaultForDiskEncryption: false
+    enableSoftDelete: false
+    
     // privateEndpoints: [
     //   {
     //     privateDnsZoneGroup: {
@@ -136,9 +187,48 @@ module vault 'br/public:avm/res/key-vault/vault:0.12.1' = {
         principalType: 'ServicePrincipal'
         roleDefinitionIdOrName: 'Key Vault Secrets User'
       }
+      {
+        principalId: 'b3e80875-7e77-48aa-b9dc-249e7dde66e9' // Replace with actual object ID
+        principalType: 'User'
+        roleDefinitionIdOrName: 'Key Vault Secrets Officer'
+      }
+
+
+    ]
+  }
+}
+
+resource privateEndpoint 'Microsoft.Network/privateEndpoints@2023-02-01' = {
+  name: '${vault.name}-pe'
+  location: 'australiaeast'
+  properties: {
+    subnet: {
+      id: vnet.properties.subnets[0].id
+    }
+    privateLinkServiceConnections: [
+      {
+        name: '${keyVaultName}-connection'
+        properties: {
+          privateLinkServiceId: vault.outputs.resourceId
+          groupIds: [
+            'vault'
+          ]
+        }
+      }
     ]
   }
 }
 
 
 
+
+module vaultDns './privateDnsZone.bicep' = {
+  name: 'vaultDns'
+  scope: resourceGroup()
+  params: { 
+    vnetName: 'vnet'
+    vnetResourceGroup: resourceGroup().name
+    privateEndpointName: '${vault.name}-pe'
+    domainName: 'vaultcore.azure.net'
+   }
+}
